@@ -1,0 +1,19 @@
+.qr-container {
+  text-align: center;
+  padding: 20px;
+}
+
+.qr-reader {
+  max-width: 400px;
+  margin: 20px auto;
+  border: 2px solid #004fb7;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.qr-result {
+  margin-top: 20px;
+  background: #f1f9ff;
+  padding: 10px;
+  border-radius: 8px;
+}
