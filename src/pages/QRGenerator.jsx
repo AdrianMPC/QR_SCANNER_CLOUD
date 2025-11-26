@@ -1,93 +1,73 @@
-import React, { useMemo, useRef, useState } from "react";
+// src/pages/QRGenerator.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { supabase } from "../api/supabaseClient";
 
 // Utils
-const isoPlusSeconds = (s) => new Date(Date.now() + Number(s || 0) * 1000).toISOString();
-const newNonce = (seed) => (crypto?.randomUUID?.() || `${Date.now()}-${seed}`);
+const isoPlusSeconds = (s) =>
+  new Date(Date.now() + Number(s || 0) * 1000).toISOString();
+const newNonce = (seed) =>
+  (crypto?.randomUUID?.() || `${Date.now()}-${seed}`);
 
-export default function QRGenerator() {
+const TTL_24H_SECONDS = 24 * 60 * 60; // 24 horas
+
+export default function QRGenerator({ eventId, eventName }) {
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState([]);
   const [students, setStudents] = useState([]);
-
-  const [eventId, setEventId] = useState("");
   const [userId, setUserId] = useState("");
-  const [ttl, setTtl] = useState(30);
-  const [format, setFormat] = useState("json");
   const [seed, setSeed] = useState(0); // fuerza nuevo nonce
-
   const canvasRef = useRef(null);
 
-  // Carga inicial (eventos + alumnos)
-  React.useEffect(() => {
+  // Carga inicial de alumnos
+  useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const { data: ev, error: evErr } = await supabase
-          .from("eventos")
-          .select("id,titulo,fecha,hora_inicio,facultad")
-          .order("fecha", { ascending: false })
-          .limit(200);
-        if (evErr) throw evErr;
-
         const { data: st, error: stErr } = await supabase
           .from("usuarios")
-          .select("id,nombre_completo,facultad,rol")
-          .eq("rol", "estudiante")
-          .order("nombre_completo", { ascending: true })
+          .select("id, nombres, apellidos")
+          .order("nombres", { ascending: true })
           .limit(1000);
+
         if (stErr) throw stErr;
 
-        setEvents(ev || []);
         setStudents(st || []);
-        if (ev?.[0]?.id) setEventId(ev[0].id);
         if (st?.[0]?.id) setUserId(st[0].id);
       } catch (e) {
-        console.error(e);
-        alert("No se pudieron cargar eventos/estudiantes.");
+        console.error("Error cargando estudiantes para QR:", e);
+        alert("No se pudieron cargar los estudiantes.");
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  const selectedEvent = useMemo(
-    () => events.find((e) => e.id === eventId),
-    [events, eventId]
-  );
-
-  // Construye el payload (sin useEffect)
+  // Payload del QR (fijo 24h, estado ASISTIO)
   const payload = useMemo(() => {
     if (!eventId || !userId) return "";
-    const issued = new Date().toISOString();
-    const exp = isoPlusSeconds(ttl);
+
+    const issued_at = new Date().toISOString();
+    const exp = isoPlusSeconds(TTL_24H_SECONDS);
     const nonce = newNonce(seed);
 
-    if (format === "json") {
-      return JSON.stringify({
-        type: "attendance",
-        event_id: eventId,
-        user_id: userId,
-        issued_at: issued,
-        exp,
-        nonce,
-      });
-    }
-    return [
-      `evento_id=${eventId}`,
-      `usuario_id=${userId}`,
-      `issued_at=${issued}`,
-      `exp=${exp}`,
-      `nonce=${nonce}`,
-    ].join(";");
-  }, [eventId, userId, ttl, format, seed]);
+    return JSON.stringify({
+      type: "attendance",
+      table: "eventos_asistentes",
+      action: "SET_ESTADO",
+      new_status: "ASISTIO",
+      evento_id: eventId,
+      usuario_id: userId,
+      issued_at,
+      exp,
+      nonce,
+    });
+  }, [eventId, userId, seed]);
 
   const copyToClipboard = async () => {
     try {
       if (!payload) return;
       await navigator.clipboard.writeText(payload);
-      alert("Payload copiado al portapapeles.");
+      alert("Contenido del QR copiado al portapapeles.");
     } catch {
       alert("No se pudo copiar.");
     }
@@ -99,55 +79,52 @@ export default function QRGenerator() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     let filename = "qr_asistencia";
-    if (selectedEvent?.titulo) filename += `_${selectedEvent.titulo.slice(0, 20)}`;
+
+    if (eventName) {
+      filename += `_${eventName.slice(0, 20)}`;
+    }
+
     a.href = pngUrl;
     a.download = `${filename}.png`;
     a.click();
   };
+
+  // Si no nos pasan eventId desde el botón → empty state
+  if (!eventId) {
+    return (
+      <div className="card">
+        <h4 style={{ margin: "0 0 6px 0" }}>Generador de QR</h4>
+        <p className="small" style={{ margin: 0 }}>
+          Aún no se ha definido ningún evento. Selecciona un evento en el panel
+          del organizador y luego abre el generador de QR.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
       <header style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>🧾 Generador de QR</h2>
         <p className="small" style={{ margin: "6px 0 0 0" }}>
-          Genera códigos QR temporales para registrar asistencia de estudiantes en eventos.
+          Este QR marca al alumno como <b>"ASISTIO"</b> en{" "}
+          <code>eventos_asistentes</code>. Validez fija de{" "}
+          <b>24 horas</b>.
+        </p>
+        <p className="small" style={{ margin: "4px 0 0 0" }}>
+          Evento: <b>{eventName || `ID ${eventId}`}</b>
         </p>
       </header>
 
       {loading ? (
         <div className="grid">
-          {/* skeletons simples */}
-          <div className="card" style={{ height: 120, opacity: .7 }} />
-          <div className="card" style={{ height: 120, opacity: .7 }} />
-          <div className="card" style={{ height: 120, opacity: .7 }} />
-          <div className="card" style={{ height: 120, opacity: .7 }} />
+          <div className="card" style={{ height: 120, opacity: 0.7 }} />
+          <div className="card" style={{ height: 120, opacity: 0.7 }} />
         </div>
       ) : (
         <>
-          {/* Filtros */}
+          {/* Selección de alumno */}
           <div className="grid" style={{ marginBottom: 12 }}>
-            <div className="card">
-              <label className="label">Evento</label>
-              <select
-                className="select"
-                style={{ marginTop: 6 }}
-                value={eventId}
-                onChange={(e) => setEventId(e.target.value)}
-              >
-                {events.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.titulo} — {ev.facultad} — {ev.fecha}
-                  </option>
-                ))}
-              </select>
-              {selectedEvent && (
-                <div className="small" style={{ marginTop: 6 }}>
-                  <span style={{ opacity: .9 }}>Inicio:</span> {selectedEvent.hora_inicio} ·{" "}
-                  <span style={{ opacity: .9 }}>Facultad:</span> {selectedEvent.facultad}
-                </div>
-              )}
-            </div>
-
             <div className="card">
               <label className="label">Alumno</label>
               <select
@@ -158,117 +135,74 @@ export default function QRGenerator() {
               >
                 {students.map((st) => (
                   <option key={st.id} value={st.id}>
-                    {st.nombre_completo} — {st.facultad}
+                    {st.nombres} {st.apellidos}
                   </option>
                 ))}
               </select>
             </div>
-
-            <div className="card">
-              <label className="label">Vigencia del QR (segundos)</label>
-              <input
-                className="input"
-                type="number"
-                min={5}
-                step={5}
-                value={ttl}
-                onChange={(e) => setTtl(e.target.value)}
-                style={{ marginTop: 6, maxWidth: 180 }}
-              />
-              <div className="small" style={{ marginTop: 6 }}>
-                Recomendado: <b>15–60 s</b> para evitar reuso.
-              </div>
-            </div>
-
-            <div className="card">
-              <label className="label">Formato</label>
-              <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
-                <label>
-                  <input
-                    type="radio"
-                    name="fmt"
-                    value="json"
-                    checked={format === "json"}
-                    onChange={() => setFormat("json")}
-                  />{" "}
-                  JSON (recomendado)
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="fmt"
-                    value="kv"
-                    checked={format === "kv"}
-                    onChange={() => setFormat("kv")}
-                  />{" "}
-                  clave=valor
-                </label>
-              </div>
-              <div className="small" style={{ marginTop: 6 }}>
-                JSON es más fácil de validar en el escáner.
-              </div>
-            </div>
           </div>
 
-          {/* QR + Payload */}
+          {/* QR + acciones */}
           <div className="grid" style={{ alignItems: "start" }}>
             <div
               ref={canvasRef}
-              className="card"
-              style={{
-                display: "grid",
-                placeItems: "center",
-                minHeight: 280,
-                borderColor: "rgba(0,79,183,.35)",
-              }}
+              className="card qr-card"
             >
               {payload ? (
                 <QRCodeCanvas value={payload} size={220} includeMargin />
               ) : (
-                <div className="small" style={{ opacity: .8 }}>
-                  Selecciona evento y alumno para generar el QR…
+                <div className="small" style={{ opacity: 0.8 }}>
+                  Selecciona un alumno para generar el QR…
                 </div>
               )}
             </div>
 
             <div className="card">
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-                <label className="label">Payload</label>
-                <span className="small" style={{ opacity: .85 }}>
-                  {format.toUpperCase()} · TTL: {ttl}s
-                </span>
-              </div>
+              <h4 style={{ margin: "0 0 6px 0" }}>🎟 Detalles del QR</h4>
+              <p className="small" style={{ marginBottom: 10 }}>
+                • Validez fija: <b>24 horas</b> desde su generación. <br />
+                • El backend/escáner debe leer el JSON y ejecutar un{" "}
+                <code>UPDATE eventos_asistentes</code> donde coincidan{" "}
+                <code>evento_id</code> y <code>usuario_id</code>, cambiando{" "}
+                <code>estado</code> a <b>"ASISTIO"</b>.
+              </p>
 
-              <textarea
-                className="codebox"
-                rows={8}
-                value={payload}
-                readOnly
-                style={{ marginTop: 6 }}
-              />
-
-              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <button className="btn btn-primary" onClick={() => setSeed((s) => s + 1)}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => setSeed((s) => s + 1)}
+                  disabled={!payload}
+                >
                   🔄 Nuevo nonce
                 </button>
-                <button className="btn btn-outline" onClick={copyToClipboard} disabled={!payload}>
-                  📋 Copiar
+
+                <button
+                  className="btn btn-outline"
+                  type="button"
+                  onClick={copyToClipboard}
+                  disabled={!payload}
+                >
+                  📋 Copiar contenido del QR
                 </button>
-                <button className="btn btn-green" onClick={downloadPng} disabled={!payload}>
+
+                <button
+                  className="btn btn-green"
+                  type="button"
+                  onClick={downloadPng}
+                  disabled={!payload}
+                >
                   ⬇️ Descargar PNG
                 </button>
               </div>
-
-              <div className="small" style={{ marginTop: 10 }}>
-                El escáner valida <code>exp</code> y registrará <b>metodo: "QR"</b>, <b>estado: "presente"</b>.
-              </div>
             </div>
-          </div>
-
-          {/* Ayuda */}
-          <div className="card" style={{ marginTop: 12 }}>
-            <b>Tips:</b> Puedes compartir el PNG por correo o WhatsApp. Si un alumno llega tarde,
-            genera un QR con TTL corto para evitar reuso. Mantén el navegador en <b>pantalla completa</b> al mostrar QRs.
           </div>
         </>
       )}

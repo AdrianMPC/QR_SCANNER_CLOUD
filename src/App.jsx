@@ -1,37 +1,83 @@
-import { HashRouter as Router, Routes, Route, Link } from "react-router-dom";
-import Menu from "./pages/Menu";
-import QRGenerator from "./pages/QRGenerator";
-import QRScanner from "./pages/QRScanner";
+// src/App.jsx
+import React, { useState } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
 
-function Header() {
-  return (
-    <header className="app-header">
-      <div className="app-header__inner">
-        <Link to="/" className="brand">UEP · Asistencia</Link>
-        <nav className="nav">
-          <Link to="/generador">Generar QR</Link>
-          <Link to="/scanner">Escanear QR</Link>
-        </nav>
-      </div>
-    </header>
-  );
-}
+import Login from "./pages/Login";
+import AlumnoEventos from "./pages/AlumnosEventos"
+import AlumnoMisEventos from "./pages/AlumnosMisEventos";
+import OrganizadorEventos from "./pages/OrganizadorEventos";
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+
+  const handleAuth = (user) => {
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
+
   return (
     <div className="app">
       <div className="bg-gradient" />
-      <Router>
-        <Header />
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<Menu />} />
-            <Route path="/generador" element={<QRGenerator />} />
-            <Route path="/scanner" element={<QRScanner />} />
-            <Route path="*" element={<div style={{ padding: 24 }}>404 - Página no encontrada</div>} />
-          </Routes>
-        </main>
-      </Router>
+
+      <main className="app-main">
+        <Routes>
+          {/* LOGIN */}
+          <Route path="/login" element={<Login onAuth={handleAuth} />} />
+
+          {/* ALUMNO - EVENTOS DISPONIBLES */}
+          <Route
+            path="/alumno/eventos"
+            element={
+              currentUser
+                ? <AlumnoEventos currentUser={currentUser} />
+                : <Navigate to="/login" replace />
+            }
+          />
+
+          <Route
+            path="/alumno/mis-eventos"
+            element={
+              currentUser
+                ? <AlumnoMisEventos currentUser={currentUser} />
+                : <Navigate to="/login" replace />
+            }
+          />
+
+          {/* ORGANIZADOR - PANEL (ver eventos y generar QR) */}
+          <Route
+            path="/organizador"
+            element={
+              currentUser?.rol === "ORGANIZADOR" ? (
+                <OrganizadorEventos
+                  currentUser={currentUser}
+                  onLogout={handleLogout}
+                />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+
+          {/* RUTA POR DEFECTO */}
+          <Route
+            path="/"
+            element={
+              currentUser ? (
+                currentUser.rol === "ESTUDIANTE" ? (
+                  <Navigate to="/alumno/eventos" replace />
+                ) : (
+                  <Navigate to="/organizador" replace />
+                )
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+        </Routes>
+      </main>
     </div>
   );
 }
